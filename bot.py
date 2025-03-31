@@ -1,18 +1,20 @@
-import asyncio
-import json
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
+import asyncio
+import json
+
 from rasp import get_rasp_week, get_group_id
 
-TOKEN = "7290297977:AAGYIceiE8Iu0ZFJQ1eS48qv3_oP1jgjOTY"
+TOKEN = "YOUR_TOKEN"
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 USERS_FILE = "users.json"
 
 def load_users():
-    """Загрузка пользователей из файла"""
+    #Загрузка пользователей из файла
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -20,14 +22,14 @@ def load_users():
         return {}
 
 def save_users(users):
-    """Сохранение пользователей в файл"""
+    #Сохранение пользователей в файл
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=4)
 
 users = load_users()
 
 async def send_main_menu(message: types.Message):
-    """Отправляет главное меню"""
+    #Отправляет главное меню
     kb = [
         [KeyboardButton(text="Получить расписание")],
         [KeyboardButton(text="Изменить группу")],
@@ -79,7 +81,7 @@ async def send_schedule(message: types.Message):
         text = f"📅 {day} ({data['date']}):\n" + "\n".join(data["lessons"])
         await message.answer(text)
 
-# Запуск бота
+#Запуск бота
 async def main():
     print("Бот запущен...")
     await dp.start_polling(bot)
