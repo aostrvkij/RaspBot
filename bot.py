@@ -1,89 +1,126 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-
 import asyncio
 import json
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.filters import CommandStart
+from aiogram.types import ReplyKeyboardRemove
+from rasp import get_week_schedule, get_group_id
 
-from rasp import get_rasp_week, get_group_id
+API_TOKEN = "YOUR_API_TOKEN"  # Замените на ваш токен
 
-TOKEN = "YOUR_TOKEN"
-bot = Bot(token=TOKEN)
+bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-USERS_FILE = "users.json"
-
+# Загрузка пользователей
 def load_users():
-    #Загрузка пользователей из файла
     try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
+        with open("users.json", "r", encoding="utf-8") as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
         return {}
 
-def save_users(users):
-    #Сохранение пользователей в файл
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=4)
+# Сохранение пользователей
+def save_users(data):
+    with open("users.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 users = load_users()
 
-async def send_main_menu(message: types.Message):
-    #Отправляет главное меню
-    kb = [
-        [KeyboardButton(text="Получить расписание")],
-        [KeyboardButton(text="Изменить группу")],
-    ]
-    markup = ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
-    await message.answer("📋 Главное меню", reply_markup=markup)
+# Клавиатура
+main_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="📅 Получить расписание")],
+        [KeyboardButton(text="🔁 Изменить группу")]
+    ],
+    resize_keyboard=True
+)
 
-@dp.message(Command("start"))
-async def start_cmd(message: types.Message):
+# Словарь дней недели
+WEEKDAYS = {
+    1: "Понедельник",
+    2: "Вторник",
+    3: "Среда",
+    4: "Четверг",
+    5: "Пятница",
+    6: "Суббота",
+    7: "Воскресенье"
+}
+
+# Форматирование расписания
+def format_day_schedule(day, lessons):
+    date = lessons[0]['дата']
+    text = f"📅 {WEEKDAYS[day]} — {date}\n\n"  # ← пустая строка
+
+    for lesson in lessons:
+        start = lesson['начало']
+        end = lesson['конец']
+        room = lesson['аудитория']
+        subject = lesson['дисциплина']
+        teacher = lesson['преподаватель']
+        text += f"🕒 {start}–{end} (ауд: {room})\n📚 {subject}\n👤 {teacher}\n\n"
+    return text.strip()
+
+# Обработка /start
+@dp.message(CommandStart())
+async def cmd_start(message: Message):
     user_id = str(message.from_user.id)
-    if user_id in users:
-        await message.answer(f"✅ Ваша группа: {users[user_id]}")
-        await send_main_menu(message)
-    else:
-        await message.answer("Введите назвение вашей группы:")
 
-@dp.message(lambda message: message.text == "Изменить группу")
-async def change_group(message: types.Message):
-    await message.answer("Введите новый номер группы:")
-
-@dp.message(lambda message: message.text.isdigit())
-async def set_group(message: types.Message):
-    user_id = str(message.from_user.id)
-    group_id = get_group_id(message.text)
-
-    if group_id:
-        users[user_id] = message.text
-        save_users(users)
-        await message.answer(f"✅ Группа {message.text} сохранена!")
-        await send_main_menu(message)
-    else:
-        await message.answer("❌ Группа не найдена, попробуйте снова.")
-
-@dp.message(lambda message: message.text == "Получить расписание")
-async def send_schedule(message: types.Message):
-    user_id = str(message.from_user.id)
     if user_id not in users:
-        await message.answer("⚠️ Сначала выберите группу!")
+        await message.answer("Привет! Введи название своей группы:")
+    else:
+        await message.answer("Добро пожаловать обратно!", reply_markup=main_kb)
+
+# Обработка ввода номера группы
+@dp.message(F.text.regexp(r"^[\w\-]+$"))
+async def group_input(message: Message):
+    user_id = str(message.from_user.id)
+    group_name = message.text.strip()
+
+    if not get_group_id(group_name):
+        await message.answer("❌ Группа не найдена. Попробуй ещё раз.")
         return
 
-    group_name = users[user_id]
-    schedule = get_rasp_week(group_name)
+    users[user_id] = group_name
+    save_users(users)
 
-    if not schedule:
-        await message.answer("❌ Расписание не найдено.")
+    await message.answer(f"✅ Группа сохранена: {group_name}", reply_markup=main_kb)
+
+# Кнопка изменить группу
+@dp.message(F.text == "🔁 Изменить группу")
+async def change_group(message: Message):
+    await message.answer("Введи новое название группы:", reply_markup=ReplyKeyboardRemove())
+
+# Получить расписание
+@dp.message(F.text == "📅 Получить расписание")
+async def get_schedule(message: Message):
+    user_id = str(message.from_user.id)
+
+    if user_id not in users:
+        await message.answer("Сначала введи название своей группы.")
         return
 
-    for day, data in schedule.items():
-        text = f"📅 {day} ({data['date']}):\n" + "\n".join(data["lessons"])
-        await message.answer(text)
+    group = users[user_id]
+    data = get_week_schedule(group)
 
-#Запуск бота
+    if data is None:
+        await message.answer("⚠️ Проблемы с сервером. Попробуйте позже.")
+        return
+
+    # Оставляем только дни, где есть пары
+    non_empty_days = {day: lessons for day, lessons in data.items() if lessons}
+
+    if not non_empty_days:
+        await message.answer("⛔ Расписание на эту неделю не найдено.")
+        return
+
+    await message.answer("Вот расписание на ближайшую учебную неделю 📚:")
+
+    for day, lessons in non_empty_days.items():
+        msg = format_day_schedule(day, lessons)
+        await message.answer(msg)
+
+# Запуск бота
 async def main():
-    print("Бот запущен...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
